@@ -10,18 +10,15 @@ import org.springframework.boot.runApplication
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.context.support.beans
-import org.springframework.security.authentication.AuthenticationCredentialsNotFoundException
-import org.springframework.security.authentication.AuthenticationManager
-import org.springframework.security.authentication.AuthenticationProvider
+import org.springframework.http.HttpStatus
+import org.springframework.security.authentication.BadCredentialsException
 import org.springframework.security.config.annotation.web.builders.HttpSecurity
 import org.springframework.security.config.annotation.web.configuration.OAuth2AuthorizationServerConfiguration
 import org.springframework.security.config.annotation.web.configurers.oauth2.server.authorization.OAuth2AuthorizationServerConfigurer
-import org.springframework.security.core.Authentication
 import org.springframework.security.core.AuthenticationException
 import org.springframework.security.core.userdetails.User
 import org.springframework.security.core.userdetails.UserDetailsService
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder
-import org.springframework.security.crypto.password.NoOpPasswordEncoder
 import org.springframework.security.crypto.password.PasswordEncoder
 import org.springframework.security.oauth2.core.AuthorizationGrantType
 import org.springframework.security.oauth2.core.ClientAuthenticationMethod
@@ -34,14 +31,21 @@ import org.springframework.security.oauth2.server.authorization.client.Registere
 import org.springframework.security.oauth2.server.authorization.config.ProviderSettings
 import org.springframework.security.oauth2.server.authorization.config.TokenSettings
 import org.springframework.security.provisioning.InMemoryUserDetailsManager
+import org.springframework.security.web.DefaultSecurityFilterChain
+import org.springframework.security.web.authentication.www.BasicAuthenticationFilter
 import org.springframework.web.servlet.function.ServerResponse
 import org.springframework.web.servlet.function.router
 import java.security.KeyPair
 import java.security.KeyPairGenerator
+import java.security.Principal
 import java.security.interfaces.RSAPrivateKey
 import java.security.interfaces.RSAPublicKey
 import java.time.Duration
 import java.util.*
+import javax.servlet.FilterChain
+import javax.servlet.ServletRequest
+import javax.servlet.ServletResponse
+import javax.servlet.http.HttpServletResponse
 
 
 @SpringBootApplication
@@ -52,7 +56,13 @@ fun main(args: Array<String>) {
         addInitializers(beans {
             bean {
                 router {
-                    GET("/secured/test"){ ServerResponse.ok().body("test ok") }
+                    GET("/secured/test") {
+                        val name = it.principal()
+                            .map { it.name }
+                            .orElse("no one")
+
+                        ServerResponse.ok().body("test ok $name")
+                    }
                 }
             }
 
@@ -60,23 +70,28 @@ fun main(args: Array<String>) {
                 val http: HttpSecurity = ref()
                 OAuth2AuthorizationServerConfiguration.applyDefaultSecurity(http)
 
-                val configurer: OAuth2AuthorizationServerConfigurer<HttpSecurity> =
-                    OAuth2AuthorizationServerConfigurer()
+                val userAndPasswordFilter: (ServletRequest, ServletResponse, FilterChain) -> Unit = { req: ServletRequest, resp, chain ->
+                    try {
+                        val username = req.getParameter("username")
+                        val password = req.getParameter("password")
+                        val passwordEncoder: PasswordEncoder = ref()
+                        val userDetailsService: UserDetailsService = ref()
 
-                configurer
-                    .clientAuthentication {
-                        it.authenticationProvider(object : AuthenticationProvider{
-                            override fun authenticate(authentication: Authentication): Authentication {
-                                return authentication
-                            }
-
-                            override fun supports(authentication: Class<*>): Boolean {
-                                return true
-                            }
-                        });
+                        val user = userDetailsService.loadUserByUsername(username)
+                        if (!passwordEncoder.matches(password, user.password)) {
+                            throw BadCredentialsException("wrong credentials")
+                        }
+                        chain.doFilter(req, resp)
+                    } catch (ex: AuthenticationException) {
+                        resp as HttpServletResponse
+                        resp.status = HttpStatus.UNAUTHORIZED.value()
+                        ex.message?.let { resp.writer.write(it) }
                     }
+                }
 
-                http.build()
+                http.addFilterAfter(userAndPasswordFilter, BasicAuthenticationFilter::class.java)
+                val build: DefaultSecurityFilterChain = http.build()
+                build
             }
 
             bean {
@@ -143,11 +158,11 @@ fun main(args: Array<String>) {
     }
 }
 
-//@Configuration(proxyBeanMethods = false)
+@Configuration(proxyBeanMethods = false)
 class MyConfiguration{
 
     @Bean
-    fun jwtCustomizer(userDetailsService: UserDetailsService, passwordEncoder: PasswordEncoder) =
+    fun jwtCustomizer(userDetailsService: UserDetailsService) =
         OAuth2TokenCustomizer<JwtEncodingContext>{ context ->
             if (OAuth2TokenType.ACCESS_TOKEN == context.tokenType) {
                 context.headers.type("JWT").build()
@@ -155,16 +170,9 @@ class MyConfiguration{
                 val username = context
                     .getAuthorizationGrant<OAuth2ClientCredentialsAuthenticationToken>()
                     .additionalParameters["username"]
-                val password = context
-                    .getAuthorizationGrant<OAuth2ClientCredentialsAuthenticationToken>()
-                    .additionalParameters["password"]
+                    ?.toString()
 
-                val user = userDetailsService.loadUserByUsername(username as String)
-                val encodedPassword = passwordEncoder.encode(password as String)
-
-                if(encodedPassword != user.password){
-                    throw AuthenticationCredentialsNotFoundException("cccc")
-                }
+                context.claims.subject(username)
             }
         }
 }
