@@ -5,7 +5,6 @@ import com.nimbusds.jose.jwk.JWKSet
 import com.nimbusds.jose.jwk.RSAKey
 import com.nimbusds.jose.jwk.source.JWKSource
 import com.nimbusds.jose.proc.SecurityContext
-import io.konad.plus
 import org.springframework.boot.autoconfigure.SpringBootApplication
 import org.springframework.boot.runApplication
 import org.springframework.context.annotation.Bean
@@ -13,20 +12,18 @@ import org.springframework.context.annotation.Configuration
 import org.springframework.context.support.beans
 import org.springframework.http.HttpStatus
 import org.springframework.security.authentication.BadCredentialsException
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
 import org.springframework.security.config.annotation.web.builders.HttpSecurity
 import org.springframework.security.config.annotation.web.configuration.OAuth2AuthorizationServerConfiguration
-import org.springframework.security.config.annotation.web.configurers.oauth2.server.authorization.OAuth2AuthorizationServerConfigurer
 import org.springframework.security.core.AuthenticationException
 import org.springframework.security.core.authority.SimpleGrantedAuthority
 import org.springframework.security.core.userdetails.User
+import org.springframework.security.core.userdetails.UserDetails
 import org.springframework.security.core.userdetails.UserDetailsService
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder
 import org.springframework.security.crypto.password.PasswordEncoder
 import org.springframework.security.oauth2.core.AuthorizationGrantType
 import org.springframework.security.oauth2.core.ClientAuthenticationMethod
 import org.springframework.security.oauth2.core.OAuth2TokenType
-import org.springframework.security.oauth2.jwt.Jwt
 import org.springframework.security.oauth2.server.authorization.JwtEncodingContext
 import org.springframework.security.oauth2.server.authorization.OAuth2TokenCustomizer
 import org.springframework.security.oauth2.server.authorization.authentication.OAuth2ClientCredentialsAuthenticationToken
@@ -42,7 +39,6 @@ import org.springframework.web.servlet.function.ServerResponse
 import org.springframework.web.servlet.function.router
 import java.security.KeyPair
 import java.security.KeyPairGenerator
-import java.security.Principal
 import java.security.interfaces.RSAPrivateKey
 import java.security.interfaces.RSAPublicKey
 import java.time.Duration
@@ -82,15 +78,12 @@ fun main(args: Array<String>) {
                         val passwordEncoder: PasswordEncoder = ref()
                         val userDetailsService: UserDetailsService = ref()
 
-                        val matchUser: (String, String) -> Unit = { u, p ->
-                            val user = userDetailsService.loadUserByUsername(u)
-                            if (!passwordEncoder.matches(p, user.password)) {
+                        if(username != null && password != null){
+                            val user = userDetailsService.loadUserByUsername(username)
+                            if (!passwordEncoder.matches(password, user.password)) {
                                 throw BadCredentialsException("wrong credentials")
                             }
-                        }
-
-                        (matchUser + username + password)
-                            ?: throw BadCredentialsException("missing username or password")
+                        }else throw BadCredentialsException("missing username or password")
 
                         chain.doFilter(req, resp)
                     } catch (ex: AuthenticationException) {
@@ -189,9 +182,11 @@ class MyConfiguration{
                     .additionalParameters["username"]
                     ?.toString()
 
+                val user: UserDetails = userDetailsService.loadUserByUsername(username)
+
                 context.claims
                     .subject(username)
-                    .claim("roles", "ROLE_USER")
+                    .claim("roles", user.authorities.map { it.authority })
             }
         }
 }
