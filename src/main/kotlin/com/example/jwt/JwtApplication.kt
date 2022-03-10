@@ -5,6 +5,7 @@ import com.nimbusds.jose.jwk.JWKSet
 import com.nimbusds.jose.jwk.RSAKey
 import com.nimbusds.jose.jwk.source.JWKSource
 import com.nimbusds.jose.proc.SecurityContext
+import io.konad.plus
 import org.springframework.boot.autoconfigure.SpringBootApplication
 import org.springframework.boot.runApplication
 import org.springframework.context.annotation.Bean
@@ -12,10 +13,12 @@ import org.springframework.context.annotation.Configuration
 import org.springframework.context.support.beans
 import org.springframework.http.HttpStatus
 import org.springframework.security.authentication.BadCredentialsException
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
 import org.springframework.security.config.annotation.web.builders.HttpSecurity
 import org.springframework.security.config.annotation.web.configuration.OAuth2AuthorizationServerConfiguration
 import org.springframework.security.config.annotation.web.configurers.oauth2.server.authorization.OAuth2AuthorizationServerConfigurer
 import org.springframework.security.core.AuthenticationException
+import org.springframework.security.core.authority.SimpleGrantedAuthority
 import org.springframework.security.core.userdetails.User
 import org.springframework.security.core.userdetails.UserDetailsService
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder
@@ -23,6 +26,7 @@ import org.springframework.security.crypto.password.PasswordEncoder
 import org.springframework.security.oauth2.core.AuthorizationGrantType
 import org.springframework.security.oauth2.core.ClientAuthenticationMethod
 import org.springframework.security.oauth2.core.OAuth2TokenType
+import org.springframework.security.oauth2.jwt.Jwt
 import org.springframework.security.oauth2.server.authorization.JwtEncodingContext
 import org.springframework.security.oauth2.server.authorization.OAuth2TokenCustomizer
 import org.springframework.security.oauth2.server.authorization.authentication.OAuth2ClientCredentialsAuthenticationToken
@@ -30,6 +34,7 @@ import org.springframework.security.oauth2.server.authorization.client.InMemoryR
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClient
 import org.springframework.security.oauth2.server.authorization.config.ProviderSettings
 import org.springframework.security.oauth2.server.authorization.config.TokenSettings
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken
 import org.springframework.security.provisioning.InMemoryUserDetailsManager
 import org.springframework.security.web.DefaultSecurityFilterChain
 import org.springframework.security.web.authentication.www.BasicAuthenticationFilter
@@ -72,15 +77,21 @@ fun main(args: Array<String>) {
 
                 val userAndPasswordFilter: (ServletRequest, ServletResponse, FilterChain) -> Unit = { req: ServletRequest, resp, chain ->
                     try {
-                        val username = req.getParameter("username")
-                        val password = req.getParameter("password")
+                        val username: String? = req.getParameter("username")
+                        val password: String? = req.getParameter("password")
                         val passwordEncoder: PasswordEncoder = ref()
                         val userDetailsService: UserDetailsService = ref()
 
-                        val user = userDetailsService.loadUserByUsername(username)
-                        if (!passwordEncoder.matches(password, user.password)) {
-                            throw BadCredentialsException("wrong credentials")
+                        val matchUser: (String, String) -> Unit = { u, p ->
+                            val user = userDetailsService.loadUserByUsername(u)
+                            if (!passwordEncoder.matches(p, user.password)) {
+                                throw BadCredentialsException("wrong credentials")
+                            }
                         }
+
+                        (matchUser + username + password)
+                            ?: throw BadCredentialsException("missing username or password")
+
                         chain.doFilter(req, resp)
                     } catch (ex: AuthenticationException) {
                         resp as HttpServletResponse
@@ -97,11 +108,17 @@ fun main(args: Array<String>) {
             bean {
                 val http: HttpSecurity = ref()
                 http.authorizeHttpRequests { authz ->
-                    authz.antMatchers("/secured/*")
-                        .hasAuthority("SCOPE_efc")
+                    authz
+                        .antMatchers("/secured/*")
+                        .hasRole("USER")
                         .and()
                         .oauth2ResourceServer()
-                        .jwt()
+                        .jwt{ jwtConfigurer ->
+                            jwtConfigurer.jwtAuthenticationConverter { jwt ->
+                                val roles: List<String>? = jwt.getClaimAsStringList("roles")
+                                JwtAuthenticationToken(jwt, roles?.map(::SimpleGrantedAuthority))
+                            }
+                        }
                 }
                 http.build()
             }
@@ -172,7 +189,9 @@ class MyConfiguration{
                     .additionalParameters["username"]
                     ?.toString()
 
-                context.claims.subject(username)
+                context.claims
+                    .subject(username)
+                    .claim("roles", "ROLE_USER")
             }
         }
 }
