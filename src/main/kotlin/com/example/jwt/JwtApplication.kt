@@ -14,6 +14,7 @@ import org.springframework.http.HttpStatus
 import org.springframework.security.authentication.BadCredentialsException
 import org.springframework.security.config.annotation.web.builders.HttpSecurity
 import org.springframework.security.config.annotation.web.configuration.OAuth2AuthorizationServerConfiguration
+import org.springframework.security.config.http.SessionCreationPolicy
 import org.springframework.security.core.AuthenticationException
 import org.springframework.security.core.authority.SimpleGrantedAuthority
 import org.springframework.security.core.userdetails.User
@@ -33,7 +34,6 @@ import org.springframework.security.oauth2.server.authorization.config.ProviderS
 import org.springframework.security.oauth2.server.authorization.config.TokenSettings
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken
 import org.springframework.security.provisioning.InMemoryUserDetailsManager
-import org.springframework.security.web.DefaultSecurityFilterChain
 import org.springframework.security.web.authentication.www.BasicAuthenticationFilter
 import org.springframework.web.servlet.function.ServerResponse
 import org.springframework.web.servlet.function.router
@@ -70,32 +70,39 @@ fun main(args: Array<String>) {
             bean {
                 val http: HttpSecurity = ref()
                 OAuth2AuthorizationServerConfiguration.applyDefaultSecurity(http)
+                http.build()
+            }
 
-                val userAndPasswordFilter: (ServletRequest, ServletResponse, FilterChain) -> Unit = { req: ServletRequest, resp, chain ->
-                    try {
-                        val username: String? = req.getParameter("username")
-                        val password: String? = req.getParameter("password")
-                        val passwordEncoder: PasswordEncoder = ref()
-                        val userDetailsService: UserDetailsService = ref()
+            bean {
+                val userAndPasswordFilter: (ServletRequest, ServletResponse, FilterChain) -> Unit =
+                    { req, resp, chain ->
+                        try {
+                            val username: String? = req.getParameter("username")
+                            val password: String? = req.getParameter("password")
+                            val passwordEncoder: PasswordEncoder = ref()
+                            val userDetailsService: UserDetailsService = ref()
 
-                        if(username != null && password != null){
-                            val user = userDetailsService.loadUserByUsername(username)
-                            if (!passwordEncoder.matches(password, user.password)) {
-                                throw BadCredentialsException("wrong credentials")
-                            }
-                        }else throw BadCredentialsException("missing username or password")
+                            if (username != null && password != null) {
+                                val user = userDetailsService.loadUserByUsername(username)
+                                if (!passwordEncoder.matches(password, user.password)) {
+                                    throw BadCredentialsException("wrong credentials")
+                                }
+                            } else throw BadCredentialsException("missing username or password")
 
-                        chain.doFilter(req, resp)
-                    } catch (ex: AuthenticationException) {
-                        resp as HttpServletResponse
-                        resp.status = HttpStatus.UNAUTHORIZED.value()
-                        ex.message?.let { resp.writer.write(it) }
+                            chain.doFilter(req, resp)
+                        } catch (ex: AuthenticationException) {
+                            resp as HttpServletResponse
+                            resp.status = HttpStatus.UNAUTHORIZED.value()
+                            ex.message?.let { resp.writer.write(it) }
+                        }
                     }
-                }
 
-                http.addFilterAfter(userAndPasswordFilter, BasicAuthenticationFilter::class.java)
-                val build: DefaultSecurityFilterChain = http.build()
-                build
+                val http: HttpSecurity = ref()
+                http
+                    .antMatcher("/oauth2/token")
+                    .addFilterAfter(userAndPasswordFilter, BasicAuthenticationFilter::class.java)
+
+                http.build()
             }
 
             bean {
@@ -105,14 +112,19 @@ fun main(args: Array<String>) {
                         .antMatchers("/secured/*")
                         .hasRole("USER")
                         .and()
-                        .oauth2ResourceServer()
-                        .jwt{ jwtConfigurer ->
-                            jwtConfigurer.jwtAuthenticationConverter { jwt ->
-                                val roles: List<String>? = jwt.getClaimAsStringList("roles")
-                                JwtAuthenticationToken(jwt, roles?.map(::SimpleGrantedAuthority))
+                        .oauth2ResourceServer { oauth2 ->
+                            oauth2
+                                .jwt { jwtConfigurer ->
+                                    jwtConfigurer.jwtAuthenticationConverter { jwt ->
+                                        val roles: List<String>? = jwt.getClaimAsStringList("roles")
+                                        JwtAuthenticationToken(jwt, roles?.map(::SimpleGrantedAuthority))
+                                    }
+                                }
                             }
                         }
-                }
+                        .sessionManagement{ session ->
+                            session.sessionCreationPolicy(SessionCreationPolicy.STATELESS)
+                        }
                 http.build()
             }
 
@@ -129,7 +141,7 @@ fun main(args: Array<String>) {
                 val encoder: PasswordEncoder = ref()
 
                 val tokenSettings = TokenSettings.builder()
-                    .accessTokenTimeToLive(Duration.ofMinutes(5))
+                    .accessTokenTimeToLive(Duration.ofMinutes(60))
                     .build()
                 val registeredClient = RegisteredClient.withId(UUID.randomUUID().toString())
                     .clientId("messaging-client")
