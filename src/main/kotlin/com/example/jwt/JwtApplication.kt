@@ -25,11 +25,11 @@ import org.springframework.security.crypto.password.PasswordEncoder
 import org.springframework.security.oauth2.core.AuthorizationGrantType
 import org.springframework.security.oauth2.core.ClientAuthenticationMethod
 import org.springframework.security.oauth2.core.OAuth2TokenType
-import org.springframework.security.oauth2.server.authorization.JwtEncodingContext
-import org.springframework.security.oauth2.server.authorization.OAuth2TokenCustomizer
+import org.springframework.security.oauth2.server.authorization.*
 import org.springframework.security.oauth2.server.authorization.authentication.OAuth2ClientCredentialsAuthenticationToken
 import org.springframework.security.oauth2.server.authorization.client.InMemoryRegisteredClientRepository
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClient
+import org.springframework.security.oauth2.server.authorization.config.ClientSettings
 import org.springframework.security.oauth2.server.authorization.config.ProviderSettings
 import org.springframework.security.oauth2.server.authorization.config.TokenSettings
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken
@@ -106,26 +106,40 @@ fun main(args: Array<String>) {
             }
 
             bean {
+                InMemoryOAuth2AuthorizationService() // This must be a JdbcOAuth2AuthorizationService if you want a stateless backend
+            }
+
+            bean {
                 val http: HttpSecurity = ref()
-                http.authorizeHttpRequests { authz ->
-                    authz
-                        .antMatchers("/secured/*")
-                        .hasRole("USER")
-                        .and()
-                        .oauth2ResourceServer { oauth2 ->
-                            oauth2
-                                .jwt { jwtConfigurer ->
+                http
+                    .authorizeHttpRequests { authz ->
+                        authz
+                            .antMatchers("/secured/*")
+                            .hasAuthority("SCOPE_efc")
+                            .antMatchers("/secured/*")
+                            .hasRole("USER")
+                            .and()
+                            .oauth2ResourceServer { oauth2 ->
+                                oauth2.jwt { jwtConfigurer ->
                                     jwtConfigurer.jwtAuthenticationConverter { jwt ->
-                                        val roles: List<String>? = jwt.getClaimAsStringList("roles")
-                                        JwtAuthenticationToken(jwt, roles?.map(::SimpleGrantedAuthority))
+                                        val service: OAuth2AuthorizationService = ref()
+                                        val token: OAuth2Authorization? = service.findByToken(jwt.tokenValue, OAuth2TokenType.ACCESS_TOKEN)
+
+                                        if(token?.accessToken?.isActive == false){
+                                            throw BadCredentialsException("token revoked")
+                                        }
+
+                                        val roles: List<String> = jwt.getClaimAsStringList("roles") ?: emptyList()
+                                        val scope: List<String> = jwt.getClaimAsStringList("scope") ?: emptyList()
+                                        JwtAuthenticationToken(
+                                            jwt,
+                                            roles.map(::SimpleGrantedAuthority) +
+                                                    scope.map { SimpleGrantedAuthority("SCOPE_$it") })
                                     }
                                 }
                             }
-                        }
-                        .sessionManagement{ session ->
-                            session.sessionCreationPolicy(SessionCreationPolicy.STATELESS)
-                        }
-                http.build()
+                    }
+                    .build()
             }
 
             bean {
@@ -140,9 +154,6 @@ fun main(args: Array<String>) {
             bean {
                 val encoder: PasswordEncoder = ref()
 
-                val tokenSettings = TokenSettings.builder()
-                    .accessTokenTimeToLive(Duration.ofMinutes(60))
-                    .build()
                 val registeredClient = RegisteredClient.withId(UUID.randomUUID().toString())
                     .clientId("messaging-client")
                     .clientSecret(encoder.encode("secret"))
@@ -151,7 +162,15 @@ fun main(args: Array<String>) {
                     .authorizationGrantType(AuthorizationGrantType.REFRESH_TOKEN)
                     .redirectUri("http://auth-server:8080/athorization_code")
                     .scope("efc")
-                    .tokenSettings(tokenSettings)
+                    .clientSettings(
+                        ClientSettings.builder()
+                            .requireProofKey(true)
+                            .build())
+                    .tokenSettings(
+                        TokenSettings.builder()
+                            .accessTokenTimeToLive(Duration.ofMinutes(60))
+                            .build()
+                    )
                     .build()
 
                 InMemoryRegisteredClientRepository(registeredClient)
@@ -198,6 +217,7 @@ class MyConfiguration{
 
                 context.claims
                     .subject(username)
+                    .id(UUID.randomUUID().toString())
                     .claim("roles", user.authorities.map { it.authority })
             }
         }
@@ -208,7 +228,7 @@ object JwKUtils {
         val keyPair: KeyPair = try {
             val keyPairGenerator = KeyPairGenerator.getInstance("RSA")
             keyPairGenerator.initialize(2048)
-            keyPairGenerator.generateKeyPair()
+            keyPairGenerator.generateKeyPair() // The key must receive a seed from the configuration if you want a stateless backend
         } catch (ex: Exception) {
             throw IllegalStateException(ex)
         }
