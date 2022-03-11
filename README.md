@@ -5,7 +5,7 @@ In contrast to the `@EnableAuthorizationServer` that [has been deprecated](https
 
 ### Notes
 
- * Everything is implemented in the file [`JwtApplication.kt`](src/main/kotlin/com/example/jwt/JwtApplication.kt) using the `bean` DSL (it's the same of using `@Configuration(proxyBeanMethods = false)` and `@Bean`).
+ * Everything is implemented in the file [`JwtApplication.kt`](src/main/kotlin/com/example/jwt/JwtApplication.kt) using the `bean{}` [Kotlin DSL](https://docs.spring.io/spring-framework/docs/current/reference/html/languages.html#kotlin-bean-definition-dsl) (it's the same of using `@Configuration(proxyBeanMethods = false)` and `@Bean`).
  * The default token endpoint is `/oauth2/token` (can be changed using `ProviderSettings`)
  * The **`password` grant_type** is [not anymore implemented](https://github.com/spring-projects/spring-authorization-server/issues/126)
  * The **refresh token** is [not given back](https://github.com/spring-projects/spring-authorization-server/pull/335) when you get an access token with the `client_credentials` grant_type. 
