@@ -10,4 +10,5 @@ In contrast to the `@EnableAuthorizationServer` that [has been deprecated](https
  * The **`password` grant_type** is [not anymore implemented](https://github.com/spring-projects/spring-authorization-server/issues/126)
  * The **refresh token** is [not given back](https://github.com/spring-projects/spring-authorization-server/pull/335) when you get an access token with the `client_credentials` grant_type. 
    You must use authorization_code grant type to get a refresh token
- * The grant type `client_credentials` doesn't check for a username and password. This is why i implemented it [with a filter](https://github.com/lucapiccinelli/spring-jwt/blob/f4efd924e708c272715581d88f8277f989e7239f/src/main/kotlin/com/example/jwt/JwtApplication.kt#L77) 
+ * The grant type `client_credentials` doesn't check for a username and password. This is why i implemented it [with a filter](https://github.com/lucapiccinelli/spring-jwt/blob/f4efd924e708c272715581d88f8277f989e7239f/src/main/kotlin/com/example/jwt/JwtApplication.kt#L77)
+ * I didn't understand why the `OAuth2TokenCustomizer` doesn't get resolved if i put it in the context using `bean{}` [instead of](https://github.com/lucapiccinelli/spring-jwt/blob/19228cb560a8a4af61be0ef5d18d73a0bbc232e8/src/main/kotlin/com/example/jwt/JwtApplication.kt#L207) `@Bean` 
