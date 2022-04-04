@@ -199,7 +199,7 @@ fun main(args: Array<String>) {
     }
 }
 
-@Configuration(proxyBeanMethods = false)
+//@Configuration(proxyBeanMethods = false)
 class MyConfiguration{
 
     @Bean
