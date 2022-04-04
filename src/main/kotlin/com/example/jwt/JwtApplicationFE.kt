@@ -46,6 +46,7 @@ fun main(args: Array<String>) {
     val hostname = "127.0.0.1"
     val port = "8080"
     val rootUri = "http://$hostname:$port"
+    val issuerUri = "http://$hostname:$port"
     val tokenRoutes = "/oauth"
     val redirectUri = "$tokenRoutes/tokenCallback"
     val tokenUri = "$tokenRoutes/token"
@@ -59,8 +60,8 @@ fun main(args: Array<String>) {
                 router {
                     POST(tokenUri){
                         val info = it.body<Map<String, String>>()
-                        val cliend_id = info["client_id"]
-                        val authorizeUrl = "/oauth2/authorize?response_type=code&client_id=$cliend_id&scope=openid&redirect_uri=$rootUri$redirectUri&state=1234"
+                        val clientId = info["client_id"]
+                        val authorizeUrl = "/oauth2/authorize?response_type=code&client_id=$clientId&scope=openid+efc&redirect_uri=$rootUri$redirectUri&state=1234"
 
                         val headers = HttpHeaders().apply {
                             contentType = MediaType.APPLICATION_FORM_URLENCODED
@@ -76,7 +77,7 @@ fun main(args: Array<String>) {
                         } catch (ex: HttpClientErrorException.NotFound){
                             val strings = ex.responseHeaders!!["Set-Cookie"]
                             headers.add("Cookie", strings!![0])
-                            headers.add("client_id", cliend_id)
+                            headers.add("client_id", clientId)
                             headers.add("secret", info["secret"])
                             rest.exchange(RequestEntity
                                 .get(authorizeUrl)
@@ -143,8 +144,15 @@ fun main(args: Array<String>) {
             bean {
                 val http: HttpSecurity = ref()
                 http
-                    .authorizeRequests {
-                        it.anyRequest().authenticated()
+                    .authorizeRequests { authz ->
+                        authz
+                            .antMatchers("/secured/*")
+                            .hasAnyAuthority("SCOPE_efc")
+                            .and()
+                            .oauth2ResourceServer().jwt()
+                    }
+                    .authorizeRequests { authz ->
+                        authz.anyRequest().authenticated()
                     }
                     .csrf().ignoringAntMatchers(tokenUri).and()
                     .httpBasic().and()
@@ -155,7 +163,7 @@ fun main(args: Array<String>) {
             bean {
                 ProviderSettings
                     .builder()
-                    .issuer(rootUri)
+                    .issuer(issuerUri)
                     .build();
             }
 
@@ -189,18 +197,20 @@ fun main(args: Array<String>) {
                 InMemoryRegisteredClientRepository(registeredClient)
             }
 
-            bean {
-                val http: HttpSecurity = ref()
-                http
-                    .authorizeHttpRequests { authz ->
-                        authz
-                            .antMatchers("/secured/*")
-                            .hasAuthority("SCOPE_efc")
-                            .and()
-                            .oauth2ResourceServer().jwt()
-                    }
-                    .build()
-            }
+//            bean {
+//                val http: HttpSecurity = ref()
+//                http
+//                    .authorizeHttpRequests { authz ->
+////                        authz
+////                            .antMatchers("/secured/*")
+////                            .hasAuthority("SCOPE_efc")
+////                            .and()
+////                            .oauth2ResourceServer().jwt()
+//
+//                        authz.antMatchers("/secured/*").permitAll()
+//                    }
+//                    .build()
+//            }
 
             bean {
                 val rsaKey: RSAKey = JwKUtils.generateRsa()
