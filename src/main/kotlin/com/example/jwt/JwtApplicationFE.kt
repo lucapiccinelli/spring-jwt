@@ -33,6 +33,7 @@ import org.springframework.util.MultiValueMap
 import org.springframework.web.client.HttpClientErrorException
 import org.springframework.web.client.exchange
 import org.springframework.web.servlet.function.ServerResponse
+import org.springframework.web.servlet.function.body
 import org.springframework.web.servlet.function.router
 import java.time.Duration
 import java.util.*
@@ -45,7 +46,7 @@ fun main(args: Array<String>) {
     val hostname = "127.0.0.1"
     val port = "8080"
     val rootUri = "http://$hostname:$port"
-    val tokenRoutes = "/bla"
+    val tokenRoutes = "/oauth"
     val redirectUri = "$tokenRoutes/tokenCallback"
     val tokenUri = "$tokenRoutes/token"
 
@@ -57,11 +58,13 @@ fun main(args: Array<String>) {
 
                 router {
                     POST(tokenUri){
-                        val authorizeUrl = "/oauth2/authorize?response_type=code&client_id=messaging-client&scope=openid&redirect_uri=$rootUri$redirectUri&state=1234"
+                        val info = it.body<Map<String, String>>()
+                        val cliend_id = info["client_id"]
+                        val authorizeUrl = "/oauth2/authorize?response_type=code&client_id=$cliend_id&scope=openid&redirect_uri=$rootUri$redirectUri&state=1234"
 
                         val headers = HttpHeaders().apply {
                             contentType = MediaType.APPLICATION_FORM_URLENCODED
-                            setBasicAuth("user1", "password")
+                            setBasicAuth(it.principal().get().name, info["password"]!!)
                         }
                         val request = RequestEntity
                             .get(authorizeUrl)
@@ -73,6 +76,8 @@ fun main(args: Array<String>) {
                         } catch (ex: HttpClientErrorException.NotFound){
                             val strings = ex.responseHeaders!!["Set-Cookie"]
                             headers.add("Cookie", strings!![0])
+                            headers.add("client_id", cliend_id)
+                            headers.add("secret", info["secret"])
                             rest.exchange(RequestEntity
                                 .get(authorizeUrl)
                                 .headers(headers)
@@ -88,9 +93,12 @@ fun main(args: Array<String>) {
                         val code: String? = it.param("code").orElse(null)
                         val state: String? = it.param("state").orElse(null)
 
+                        val clientId = it.headers().header("client_id")[0]
+                        val secret = it.headers().header("secret")[0]
+
                         val headers = HttpHeaders().apply {
                             contentType = MediaType.APPLICATION_FORM_URLENCODED
-                            setBasicAuth("messaging-client", "secret")
+                            setBasicAuth(clientId, secret)
                         }
                         val obj: MultiValueMap<String, String> = LinkedMultiValueMap<String, String>().apply {
                             add("grant_type", "authorization_code")
