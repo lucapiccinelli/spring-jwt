@@ -8,20 +8,31 @@ import com.nimbusds.jose.proc.SecurityContext
 import org.springframework.boot.autoconfigure.SpringBootApplication
 import org.springframework.boot.runApplication
 import org.springframework.boot.web.client.RestTemplateBuilder
+import org.springframework.context.annotation.Bean
+import org.springframework.context.annotation.Configuration
+import org.springframework.context.support.BeanDefinitionDsl
 import org.springframework.context.support.beans
 import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
 import org.springframework.http.RequestEntity
 import org.springframework.http.ResponseEntity
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
 import org.springframework.security.config.annotation.web.builders.HttpSecurity
 import org.springframework.security.config.annotation.web.configuration.OAuth2AuthorizationServerConfiguration
 import org.springframework.security.config.http.SessionCreationPolicy
 import org.springframework.security.core.userdetails.User
+import org.springframework.security.core.userdetails.UserDetails
+import org.springframework.security.core.userdetails.UserDetailsService
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder
 import org.springframework.security.crypto.password.PasswordEncoder
 import org.springframework.security.oauth2.core.AuthorizationGrantType
 import org.springframework.security.oauth2.core.ClientAuthenticationMethod
+import org.springframework.security.oauth2.core.OAuth2TokenType
 import org.springframework.security.oauth2.core.oidc.OidcScopes
+import org.springframework.security.oauth2.server.authorization.JwtEncodingContext
+import org.springframework.security.oauth2.server.authorization.OAuth2TokenCustomizer
+import org.springframework.security.oauth2.server.authorization.authentication.OAuth2AuthorizationCodeAuthenticationToken
+import org.springframework.security.oauth2.server.authorization.authentication.OAuth2ClientCredentialsAuthenticationToken
 import org.springframework.security.oauth2.server.authorization.client.InMemoryRegisteredClientRepository
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClient
 import org.springframework.security.oauth2.server.authorization.config.ClientSettings
@@ -197,21 +208,6 @@ fun main(args: Array<String>) {
                 InMemoryRegisteredClientRepository(registeredClient)
             }
 
-//            bean {
-//                val http: HttpSecurity = ref()
-//                http
-//                    .authorizeHttpRequests { authz ->
-////                        authz
-////                            .antMatchers("/secured/*")
-////                            .hasAuthority("SCOPE_efc")
-////                            .and()
-////                            .oauth2ResourceServer().jwt()
-//
-//                        authz.antMatchers("/secured/*").permitAll()
-//                    }
-//                    .build()
-//            }
-
             bean {
                 val rsaKey: RSAKey = JwKUtils.generateRsa()
                 val jwkSet = JWKSet(rsaKey)
@@ -233,4 +229,22 @@ fun main(args: Array<String>) {
             }
         })
     }
+}
+
+@Configuration(proxyBeanMethods = false)
+class MyConfigurationFE{
+
+    @Bean
+    fun jwtCustomizer() =
+        OAuth2TokenCustomizer<JwtEncodingContext>{ context ->
+            if (OAuth2TokenType.ACCESS_TOKEN == context.tokenType) {
+                context.headers.type("JWT").build()
+
+                val principal = context.getPrincipal<UsernamePasswordAuthenticationToken>()
+
+                context.claims
+                    .id(UUID.randomUUID().toString())
+                    .claim("roles", principal.authorities.map { it.authority })
+            }
+        }
 }
