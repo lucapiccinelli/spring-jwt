@@ -8,17 +8,14 @@ import com.nimbusds.jose.proc.SecurityContext
 import org.springframework.boot.autoconfigure.SpringBootApplication
 import org.springframework.boot.runApplication
 import org.springframework.boot.web.client.RestTemplateBuilder
-import org.springframework.boot.web.servlet.FilterRegistrationBean
-import org.springframework.context.ConfigurableApplicationContext
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
-import org.springframework.context.annotation.Scope
-import org.springframework.context.support.BeanDefinitionDsl
 import org.springframework.context.support.beans
 import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
 import org.springframework.http.RequestEntity
 import org.springframework.http.ResponseEntity
+import org.springframework.security.authentication.AuthenticationCredentialsNotFoundException
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
 import org.springframework.security.config.annotation.web.builders.HttpSecurity
 import org.springframework.security.config.annotation.web.configuration.OAuth2AuthorizationServerConfiguration
@@ -35,26 +32,23 @@ import org.springframework.security.oauth2.core.OAuth2TokenType
 import org.springframework.security.oauth2.core.oidc.OidcScopes
 import org.springframework.security.oauth2.server.authorization.JwtEncodingContext
 import org.springframework.security.oauth2.server.authorization.OAuth2TokenCustomizer
-import org.springframework.security.oauth2.server.authorization.authentication.OAuth2AuthorizationCodeAuthenticationToken
-import org.springframework.security.oauth2.server.authorization.authentication.OAuth2ClientCredentialsAuthenticationToken
 import org.springframework.security.oauth2.server.authorization.client.InMemoryRegisteredClientRepository
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClient
+import org.springframework.security.oauth2.server.authorization.client.RegisteredClientRepository
 import org.springframework.security.oauth2.server.authorization.config.ClientSettings
 import org.springframework.security.oauth2.server.authorization.config.ProviderSettings
 import org.springframework.security.oauth2.server.authorization.config.TokenSettings
 import org.springframework.security.provisioning.InMemoryUserDetailsManager
+import org.springframework.security.web.authentication.www.BasicAuthenticationFilter
 import org.springframework.util.LinkedMultiValueMap
 import org.springframework.util.MultiValueMap
 import org.springframework.web.client.HttpClientErrorException
 import org.springframework.web.client.exchange
-import org.springframework.web.context.WebApplicationContext
-import org.springframework.web.context.annotation.RequestScope
 import org.springframework.web.servlet.function.ServerResponse
 import org.springframework.web.servlet.function.body
 import org.springframework.web.servlet.function.router
 import java.time.Duration
 import java.util.*
-import javax.servlet.Filter
 import javax.servlet.http.HttpServletRequest
 
 
@@ -79,12 +73,15 @@ fun main(args: Array<String>) {
                 router {
                     POST(tokenUri){
                         val info = it.body<Map<String, String>>()
-                        val clientId = info["client_id"]
+                        val clientId = it.principal().get().name
                         val authorizeUrl = "/oauth2/authorize?response_type=code&client_id=$clientId&scope=openid+efc&redirect_uri=$rootUri$redirectUri&state=1234"
+
+                        val username = info["username"]!!
+                        val password = info["password"]!!
 
                         val headers = HttpHeaders().apply {
                             contentType = MediaType.APPLICATION_FORM_URLENCODED
-                            setBasicAuth(it.principal().get().name, info["password"]!!)
+                            setBasicAuth(username, password)
                         }
                         val request = RequestEntity
                             .get(authorizeUrl)
@@ -97,7 +94,10 @@ fun main(args: Array<String>) {
                             val strings = ex.responseHeaders!!["Set-Cookie"]
                             headers.add("Cookie", strings!![0])
                             headers.add("client_id", clientId)
-                            headers.add("secret", info["secret"])
+
+                            val secret = SecurityContextHolder.getContext().authentication.credentials.toString()
+
+                            headers.add("secret", secret)
                             rest.exchange(RequestEntity
                                 .get(authorizeUrl)
                                 .headers(headers)
@@ -155,9 +155,7 @@ fun main(args: Array<String>) {
                 router {
                     GET("/secured/test") {
                         val userDetails: CurrentUserService = ref()
-
                         val name = userDetails.getUser().username
-
                         ServerResponse.ok().body("test ok $name")
                     }
                 }
@@ -174,18 +172,38 @@ fun main(args: Array<String>) {
 
             bean {
                 val http: HttpSecurity = ref()
+                val clientRepository: RegisteredClientRepository = ref()
+                val passwordEncoder: PasswordEncoder = ref()
                 http
-                    .authorizeRequests { authz ->
+                    .antMatcher(tokenUri)
+                    .authenticationManager { auth ->
+                        clientRepository.findByClientId(auth.name)
+                            ?.let { client ->
+                                if (!passwordEncoder.matches(auth.credentials.toString(), client.clientSecret))
+                                    throw AuthenticationCredentialsNotFoundException("")
+                                auth
+                            }
+                            ?: throw AuthenticationCredentialsNotFoundException("")
+                    }
+                    .httpBasic().and()
+                    .csrf().ignoringAntMatchers(tokenUri).and()
+                    .build()
+            }
+
+            bean {
+                val http: HttpSecurity = ref()
+
+                http
+                    .authorizeHttpRequests { authz ->
                         authz
                             .antMatchers("/secured/*")
                             .hasAnyAuthority("SCOPE_efc")
                             .and()
                             .oauth2ResourceServer().jwt()
                     }
-                    .authorizeRequests { authz ->
+                    .authorizeHttpRequests { authz ->
                         authz.anyRequest().authenticated()
                     }
-                    .csrf().ignoringAntMatchers(tokenUri).and()
                     .httpBasic().and()
                     .sessionManagement().sessionCreationPolicy(SessionCreationPolicy.STATELESS).and()
                     .build()
