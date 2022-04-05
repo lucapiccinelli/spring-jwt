@@ -8,8 +8,11 @@ import com.nimbusds.jose.proc.SecurityContext
 import org.springframework.boot.autoconfigure.SpringBootApplication
 import org.springframework.boot.runApplication
 import org.springframework.boot.web.client.RestTemplateBuilder
+import org.springframework.boot.web.servlet.FilterRegistrationBean
+import org.springframework.context.ConfigurableApplicationContext
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
+import org.springframework.context.annotation.Scope
 import org.springframework.context.support.BeanDefinitionDsl
 import org.springframework.context.support.beans
 import org.springframework.http.HttpHeaders
@@ -20,6 +23,7 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.config.annotation.web.builders.HttpSecurity
 import org.springframework.security.config.annotation.web.configuration.OAuth2AuthorizationServerConfiguration
 import org.springframework.security.config.http.SessionCreationPolicy
+import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.security.core.userdetails.User
 import org.springframework.security.core.userdetails.UserDetails
 import org.springframework.security.core.userdetails.UserDetailsService
@@ -43,11 +47,15 @@ import org.springframework.util.LinkedMultiValueMap
 import org.springframework.util.MultiValueMap
 import org.springframework.web.client.HttpClientErrorException
 import org.springframework.web.client.exchange
+import org.springframework.web.context.WebApplicationContext
+import org.springframework.web.context.annotation.RequestScope
 import org.springframework.web.servlet.function.ServerResponse
 import org.springframework.web.servlet.function.body
 import org.springframework.web.servlet.function.router
 import java.time.Duration
 import java.util.*
+import javax.servlet.Filter
+import javax.servlet.http.HttpServletRequest
 
 
 @SpringBootApplication
@@ -103,7 +111,6 @@ fun main(args: Array<String>) {
 
                     GET(redirectUri){
                         val code: String? = it.param("code").orElse(null)
-                        val state: String? = it.param("state").orElse(null)
 
                         val clientId = it.headers().header("client_id")[0]
                         val secret = it.headers().header("secret")[0]
@@ -132,11 +139,24 @@ fun main(args: Array<String>) {
             }
 
             bean {
+                CurrentUserService {
+                    val service: UserDetailsService = ref()
+                    val principal = (SecurityContextHolder.getContext().authentication.name as String)
+                    try {
+                        service.loadUserByUsername(principal)
+                    }catch (ex: Exception){
+                        ex.printStackTrace()
+                        throw ex
+                    }
+                }
+            }
+
+            bean {
                 router {
                     GET("/secured/test") {
-                        val name = it.principal()
-                            .map { it.name }
-                            .orElse("no one")
+                        val userDetails: CurrentUserService = ref()
+
+                        val name = userDetails.getUser().username
 
                         ServerResponse.ok().body("test ok $name")
                     }
@@ -231,6 +251,8 @@ fun main(args: Array<String>) {
     }
 }
 
+
+
 @Configuration(proxyBeanMethods = false)
 class MyConfigurationFE{
 
@@ -247,4 +269,8 @@ class MyConfigurationFE{
                     .claim("roles", principal.authorities.map { it.authority })
             }
         }
+}
+
+fun interface CurrentUserService {
+    fun getUser(): UserDetails
 }

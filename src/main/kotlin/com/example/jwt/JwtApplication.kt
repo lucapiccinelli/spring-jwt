@@ -35,6 +35,7 @@ import org.springframework.security.oauth2.server.authorization.config.TokenSett
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken
 import org.springframework.security.provisioning.InMemoryUserDetailsManager
 import org.springframework.security.web.authentication.www.BasicAuthenticationFilter
+import org.springframework.web.server.WebFilter
 import org.springframework.web.servlet.function.ServerResponse
 import org.springframework.web.servlet.function.router
 import java.security.KeyPair
@@ -43,6 +44,7 @@ import java.security.interfaces.RSAPrivateKey
 import java.security.interfaces.RSAPublicKey
 import java.time.Duration
 import java.util.*
+import javax.servlet.Filter
 import javax.servlet.FilterChain
 import javax.servlet.ServletRequest
 import javax.servlet.ServletResponse
