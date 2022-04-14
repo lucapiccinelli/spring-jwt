@@ -205,7 +205,7 @@ fun main(args: Array<String>) {
 class MyConfiguration{
 
     @Bean
-    fun jwtCustomizer(userDetailsService: UserDetailsService) =
+    fun jwtCustomizer(userDetailsService: UserDetailsService): OAuth2TokenCustomizer<JwtEncodingContext> =
         OAuth2TokenCustomizer<JwtEncodingContext>{ context ->
             if (OAuth2TokenType.ACCESS_TOKEN == context.tokenType) {
                 context.headers.type("JWT").build()

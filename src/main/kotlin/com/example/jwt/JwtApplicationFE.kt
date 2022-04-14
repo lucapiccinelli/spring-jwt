@@ -74,7 +74,7 @@ fun main(args: Array<String>) {
                     POST(tokenUri){
                         val info = it.body<Map<String, String>>()
                         val clientId = it.principal().get().name
-                        val authorizeUrl = "/oauth2/authorize?response_type=code&client_id=$clientId&scope=openid+efc&redirect_uri=$rootUri$redirectUri&state=1234"
+                        val authorizeUrl = "/oauth2/authorize?response_type=code&client_id=$clientId&scope=openid+efc&redirect_uri=$rootUri$redirectUri"
 
                         val username = info["username"]!!
                         val password = info["password"]!!
@@ -201,10 +201,6 @@ fun main(args: Array<String>) {
                             .and()
                             .oauth2ResourceServer().jwt()
                     }
-                    .authorizeHttpRequests { authz ->
-                        authz.anyRequest().authenticated()
-                    }
-                    .httpBasic().and()
                     .sessionManagement().sessionCreationPolicy(SessionCreationPolicy.STATELESS).and()
                     .build()
             }
@@ -237,6 +233,7 @@ fun main(args: Array<String>) {
                             .build())
                     .tokenSettings(
                         TokenSettings.builder()
+                            .reuseRefreshTokens(false)
                             .accessTokenTimeToLive(Duration.ofMinutes(60))
                             .refreshTokenTimeToLive(Duration.ofMinutes(120))
                             .build()
